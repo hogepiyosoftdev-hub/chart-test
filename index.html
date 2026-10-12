@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>高度タスク管理ツール (WBS / EVM / イナズマ線)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Top Header Navigation & Controls -->
+  <header>
+    <div class="brand-section">
+      <span class="brand-icon">⚡</span>
+      <div class="brand-title">SmartPM Task Manager</div>
+      <span class="brand-badge">WBS + EVM + イナズマ線</span>
+    </div>
+
+    <div class="header-controls">
+      <!-- Status Date Control -->
+      <div class="status-date-control" title="進捗判定の基準となる日付。イナズマ線やPVの計算基準です。">
+        <label for="status-date-input">基準日 (Status Date):</label>
+        <input type="date" id="status-date-input">
+        <button class="quick-date-btn" data-offset="-7">-7日</button>
+        <button class="quick-date-btn" data-offset="0">今日</button>
+        <button class="quick-date-btn" data-offset="7">+7日</button>
+      </div>
+
+      <!-- View Switcher -->
+      <div class="view-tabs">
+        <button class="view-tab-btn active" data-view="split">統合ビュー (WBS+ガント)</button>
+        <button class="view-tab-btn" data-view="wbs">WBS一覧</button>
+        <button class="view-tab-btn" data-view="gantt">ガントチャート＆イナズマ線</button>
+        <button class="view-tab-btn" data-view="dashboard">分類・集計ダッシュボード</button>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-buttons">
+        <button id="btn-add-task" class="btn btn-primary" title="新しいタスクを追加">＋ 新規タスク</button>
+        <button id="btn-export" class="btn btn-secondary" title="プロジェクトデータをJSONファイルとして保存">💾 保存/出力</button>
+        <button id="btn-import" class="btn btn-secondary" title="保存したJSONファイルを読込">📂 読込</button>
+        <input type="file" id="file-import" accept=".json" style="display: none;">
+        <button id="btn-reset" class="btn btn-danger-outline" title="初期サンプルデータにリセット">↺ 初期化</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- EVM Metrics Bar -->
+  <div id="evm-metrics-bar" class="evm-metrics-container">
+    <!-- Populated by UIController.renderEVMHeader() -->
+  </div>
+
+  <!-- Filter & Search Toolbar -->
+  <div class="filter-bar">
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="タスク名、WBS番号、担当者で検索...">
+    </div>
+
+    <div class="filter-group">
+      <label for="filter-category">分類:</label>
+      <select id="filter-category">
+        <option value="all">すべてのカテゴリ</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label for="filter-status">ステータス:</label>
+      <select id="filter-status">
+        <option value="all">すべてのステータス</option>
+        <option value="not_started">未着手</option>
+        <option value="in_progress">進行中</option>
+        <option value="completed">完了</option>
+        <option value="on_hold">保留</option>
+      </select>
+    </div>
+
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-muted);">
+      <span><span style="display:inline-block; width:10px; height:10px; background:#ef4444; border-radius:50%; margin-right:4px;"></span>赤折れ線: <b>イナズマ線</b> (左突出=遅延 / 右突出=前倒し)</span>
+      <span><span style="display:inline-block; width:12px; border-top:2px dashed #ef4444; margin-right:4px; vertical-align:middle;"></span>赤破線: <b>基準日</b></span>
+    </div>
+  </div>
+
+  <!-- Split View (WBS Table & Gantt Chart) -->
+  <div id="split-container">
+    <!-- Left: WBS Panel -->
+    <div id="wbs-panel" class="panel">
+      <div class="panel-header">
+        <span>WBS (作業分解構成) & タスク詳細</span>
+        <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">
+          D&Dで並び替え・親子タスク化 (ドラッグして前後に配置 / 行中央で子タスク化)
+        </span>
+      </div>
+      <div id="wbs-table-container" class="table-container">
+        <table class="wbs-table">
+          <thead>
+            <tr>
+              <th class="col-wbs">WBS</th>
+              <th class="col-name">タスク名</th>
+              <th class="col-status">状態</th>
+              <th class="col-prio">優先</th>
+              <th class="col-date">開始</th>
+              <th class="col-date">終了</th>
+              <th class="col-progress">進捗率</th>
+              <th class="col-num" title="Planned Value / Budget at Completion">BAC</th>
+              <th class="col-num" title="Earned Value">EV</th>
+              <th class="col-num" title="Actual Cost">AC</th>
+              <th class="col-pred" title="先行タスク（依存関係）">先行</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="wbs-tbody">
+            <!-- Populated by UIController.renderWbsTable() -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Draggable Split Resizer Bar -->
+    <div id="split-resizer" class="split-resizer" title="ドラッグしてWBSとガントチャートの表示幅を調整">
+      <div class="resizer-handle-grip"></div>
+    </div>
+
+    <!-- Right: Gantt Chart & Inazuma Line Panel -->
+    <div id="gantt-panel" class="panel">
+      <div class="panel-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>ガントチャート & イナズマ線</span>
+          <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">
+            (D&D: バー中央で移動 / 左右端で期間伸縮)
+          </span>
+        </div>
+        <div class="gantt-toolbar">
+          <label class="toggle-btn" title="最長所要時間の経路（クリティカルパス）を赤色で強調">
+            <input type="checkbox" id="toggle-critical-path">
+            <span>クリティカルパス</span>
+          </label>
+          <!-- Plan / Actual Dual Display Mode Switch -->
+          <div class="gantt-mode-switcher" style="display: flex; gap: 2px;" title="ガントバー表示切替">
+            <button class="gantt-tool-btn active" data-bar-mode="both" id="bar-mode-both" title="予定と実績を同一行内でスマート重畳表示">予定+実績</button>
+            <button class="gantt-tool-btn" data-bar-mode="plan" id="bar-mode-plan" title="予定バーのみ表示">予定のみ</button>
+            <button class="gantt-tool-btn" data-bar-mode="actual" id="bar-mode-actual" title="実績バーのみ表示">実績のみ</button>
+          </div>
+          <div style="display: flex; gap: 2px;">
+            <button class="gantt-tool-btn" id="btn-jump-today" title="今日の日付へスクロール">今日</button>
+            <button class="gantt-tool-btn" id="btn-jump-status" title="基準日へスクロール">基準日</button>
+          </div>
+          <div style="display: flex; gap: 2px;">
+            <button class="gantt-tool-btn active" data-scale="day" id="scale-day">日</button>
+            <button class="gantt-tool-btn" data-scale="week" id="scale-week">週</button>
+            <button class="gantt-tool-btn" data-scale="month" id="scale-month">月</button>
+          </div>
+        </div>
+      </div>
+      <div id="gantt-chart-container" class="gantt-container">
+        <!-- Populated by UIController.renderGanttChart() -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Drag Tooltip -->
+  <div id="gantt-drag-tooltip" class="gantt-drag-tooltip"></div>
+
+  <!-- Multi-axis Aggregation Dashboard Section -->
+  <div id="dashboard-section" style="display: none;">
+    <!-- Populated by UIController.renderDashboard() -->
+  </div>
+
+  <!-- Task Edit / Add Modal -->
+  <div id="task-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div id="modal-title" class="modal-title">タスク編集</div>
+        <button id="modal-close-btn" class="modal-close">×</button>
+      </div>
+      <form id="task-form">
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group full-width">
+              <label for="modal-name">タスク名 *</label>
+              <input type="text" id="modal-name" required placeholder="タスク名を入力">
+            </div>
+
+            <div class="form-group">
+              <label for="modal-parent">親タスク (WBS階層)</label>
+              <select id="modal-parent">
+                <option value="">(ルート直下 / 親なし)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="modal-category">分類（カテゴリ）</label>
+              <input type="text" id="modal-category" placeholder="設計、開発、テスト、管理 等">
+            </div>
+
+            <!-- Section: 📅 予定 (Plan) -->
+            <div class="form-section-card full-width plan-card">
+              <div class="section-card-header">
+                <span class="section-card-title">📅 予定 (Plan)</span>
+                <span class="section-card-sub">計画期間および予定工数</span>
+              </div>
+              <div class="section-card-grid">
+                <div class="form-group">
+                  <label for="modal-start-date">予定開始日 *</label>
+                  <input type="date" id="modal-start-date" required>
+                </div>
+                <div class="form-group">
+                  <label for="modal-end-date">予定終了日（期限） *</label>
+                  <input type="date" id="modal-end-date" required>
+                </div>
+                <div class="form-group full-width">
+                  <label for="modal-bac">予定工数 / 予算 (BAC) [時間]</label>
+                  <input type="number" id="modal-bac" step="0.5" min="0" required>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section: ⏱ 実績 (Actual) -->
+            <div class="form-section-card full-width actual-card">
+              <div class="section-card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="section-card-title">⏱ 実績 (Actual)</span>
+                  <span class="section-card-sub">実際の着手・完了日および実績工数</span>
+                </div>
+                <button type="button" id="btn-copy-plan-to-actual" class="btn-quick-copy" title="予定開始日・終了日を実績にコピー">
+                  予定から転記 ⤓
+                </button>
+              </div>
+              <div class="section-card-grid">
+                <div class="form-group">
+                  <label for="modal-actual-start-date">実績開始日 (着手日)</label>
+                  <input type="date" id="modal-actual-start-date" placeholder="未着手の場合は空欄">
+                </div>
+                <div class="form-group">
+                  <label for="modal-actual-end-date">実績終了日 (完了日)</label>
+                  <input type="date" id="modal-actual-end-date" placeholder="進行中の場合は空欄">
+                </div>
+                <div class="form-group">
+                  <label for="modal-ac">実績工数 / 実費 (AC) [時間]</label>
+                  <input type="number" id="modal-ac" step="0.5" min="0" required>
+                </div>
+                <div class="form-group">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label for="modal-progress" style="margin-bottom: 0;">進捗率 (%)</label>
+                    <span id="modal-progress-val" style="font-size: 13px; font-weight: bold; color: #60a5fa;">0%</span>
+                  </div>
+                  <input type="range" id="modal-progress" min="0" max="100" step="5" style="width: 100%;">
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group full-width" style="display: flex; align-items: center; gap: 8px;">
+              <input type="checkbox" id="modal-is-milestone" style="width: auto; cursor: pointer;">
+              <label for="modal-is-milestone" style="margin-bottom: 0; cursor: pointer;">マイルストーンとして設定（◆ ダイヤ形状表示・工数0h）</label>
+            </div>
+
+            <div class="form-group">
+              <label for="modal-priority">優先度</label>
+              <select id="modal-priority">
+                <option value="low">低 (Low)</option>
+                <option value="medium">中 (Medium)</option>
+                <option value="high">高 (High)</option>
+                <option value="urgent">緊急 (Urgent)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="modal-status">ステータス</label>
+              <select id="modal-status">
+                <option value="not_started">未着手</option>
+                <option value="in_progress">進行中</option>
+                <option value="completed">完了</option>
+                <option value="on_hold">保留</option>
+              </select>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="modal-assignee">担当者</label>
+              <input type="text" id="modal-assignee" placeholder="例: 佐藤、田中">
+            </div>
+
+            <div class="form-group full-width">
+              <label>先行タスク（依存関係: このタスクが始まる前に完了が必要なタスク）</label>
+              <div id="modal-predecessors" class="pred-checkbox-container">
+                <!-- Checkboxes populated dynamically -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="modal-cancel-btn" class="btn btn-secondary">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const taskManager = new TaskManager();
+      taskManager.init();
+
+      const uiController = new UIController(taskManager);
+      uiController.init();
+
+      window.app = { taskManager, uiController };
+    });
+  </script>
+</body>
+</html>
